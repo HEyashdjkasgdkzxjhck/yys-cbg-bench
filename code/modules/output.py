@@ -146,12 +146,12 @@ class Output(object):
                         match.group(span[1])
                     ) <= span[3]:
                         continue
-                    index_x1 = font.getsize(
+                    index_x1 = int(font.getlength(
                         text_line[:match.span(span[0])[0]]
-                    )[0]
-                    index_x2 = font.getsize(
+                    ))
+                    index_x2 = int(font.getlength(
                         text_line[:match.span(span[0])[1]]
-                    )[0] - 1
+                    )) - 1
                     draw.rectangle((index_area_start[0] + index_x1,
                                     index_area_start[1],
                                     index_area_start[0] + index_x2,
@@ -165,19 +165,19 @@ class Output(object):
         index_line = [self.__margin[0], self.__margin[1]]
         if head:
             index_line[1] += height_line_2 + self.__margin_head
-            width_lines.append(font_2.getsize(head)[0])
+            width_lines.append(int(font_2.getlength(head)))
         for i, paragraph in enumerate(content):
             if i > 0:
                 index_line[1] -= self.__margin_line
                 index_line[1] += self.__margin_paragraph
             for line in paragraph.splitlines():
                 index_line[1] += height_line + self.__margin_line
-                width_lines.append(font.getsize(line)[0])
+                width_lines.append(int(font.getlength(line)))
         if foot:
             index_line[1] -= self.__margin_line
             index_line[1] += self.__margin_foot
             index_line[1] += height_line_2 + self.__margin_line
-            width_lines.append(font_2.getsize(foot)[0])
+            width_lines.append(int(font_2.getlength(foot)))
         return (max(width_lines) + self.__margin[0] + self.__margin[2],
                 index_line[1] - self.__margin_line + self.__margin[3])
 

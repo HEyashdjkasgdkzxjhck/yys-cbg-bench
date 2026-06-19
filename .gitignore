@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+cbg/
+code/cbg/
+code/__pycache__/
+code/modules/__pycache__/
+output/
+*.exe

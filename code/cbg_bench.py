@@ -41,6 +41,9 @@ HELP = (
     '\n  -v, --version  程序版本'
     '\n  -l, --lite     输出结果精简化(未指定则输出完整结果)'
     '\n  -u, --url      藏宝阁商品详情链接'
+    '\n  --dump-raw     保存藏宝阁接口原始返回 JSON'
+    '\n  --dump-ai      保存适合 AI 分析的结构化 JSON'
+    '\n  --dump-dir     指定输出目录(默认 output)'
     '\n+ 若未指定 -u, 程序会读取未知参数, 若也无未知参数, 不启动程序'
     '\n+ 不带任何参数也可启动程序, 会有参数输入引导',
     '输出结果:',
@@ -202,6 +205,9 @@ HEROES_PANEL = {
 }  # 式神基础面板
 
 LITE = False  # 输出结果精简化(且不考核御魂池)
+DUMP_RAW = False  # 保存藏宝阁接口原始返回 JSON
+DUMP_AI = False  # 保存适合 AI 分析的结构化 JSON
+DUMP_DIR = 'output'  # 输出目录
 USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
               ' AppleWebKit/537.36 (KHTML, like Gecko)'
               ' Chrome/84.0.4147.89 Safari/537.36')
@@ -1262,10 +1268,17 @@ def check_modules():
 
 def parse_args(args):
     global LITE
+    global DUMP_RAW
+    global DUMP_AI
+    global DUMP_DIR
     LITE = False
+    DUMP_RAW = False
+    DUMP_AI = False
     try:
         opts, args = getopt.getopt(
-            args, 'hvlu:', ['help', 'version', 'lite', 'url=']
+            args, 'hvlu:',
+            ['help', 'version', 'lite', 'url=',
+             'dump-raw', 'dump-ai', 'dump-dir=']
         )
     except getopt.GetoptError:
         opts, args = [('--undefined', '')], []
@@ -1289,12 +1302,373 @@ def parse_args(args):
             LITE = True
         elif opt in ('-u', '--url'):
             url_player = value
+        elif opt == '--dump-raw':
+            DUMP_RAW = True
+        elif opt == '--dump-ai':
+            DUMP_AI = True
+        elif opt == '--dump-dir':
+            DUMP_DIR = value
     if not url_player and args:
         url_player = args[0]
     if not helped and not url_player:
         cio(COPYRIGHT)
         cio(HELP)
     return url_player
+
+
+def _ensure_dump_dir():
+    """确保输出目录存在"""
+    if not path.isdir(DUMP_DIR):
+        os.makedirs(DUMP_DIR, exist_ok=True)
+
+
+def dump_raw_data():
+    """保存藏宝阁接口原始返回 JSON"""
+    if not DATA_SOURCE:
+        return
+    _ensure_dump_dir()
+    file_raw = path.join(DUMP_DIR, 'raw_cbg.json')
+    with open(file_raw, 'w', encoding='utf-8') as f:
+        json.dump(DATA_SOURCE, f, ensure_ascii=False, indent=2)
+    cio('已保存原始数据 \'%s\'' % path.basename(file_raw), 'info')
+    try:
+        data_game = json.loads(DATA_SOURCE.get('equip', {})
+                               .get('equip_desc', '{}'))
+    except (json.JSONDecodeError, TypeError):
+        cio('equip_desc 解析失败, 跳过保存', 'warn')
+        return
+    file_desc = path.join(DUMP_DIR, 'equip_desc.json')
+    with open(file_desc, 'w', encoding='utf-8') as f:
+        json.dump(data_game, f, ensure_ascii=False, indent=2)
+    cio('已保存装备描述 \'%s\'' % path.basename(file_desc), 'info')
+
+
+def dump_ai_profile():
+    """保存适合 AI 分析的结构化 JSON"""
+    if not DATA_SOURCE:
+        return
+    _ensure_dump_dir()
+    data_core = DATA_SOURCE.get('equip', {})
+    try:
+        data_game = json.loads(data_core.get('equip_desc', '{}'))
+    except (json.JSONDecodeError, TypeError):
+        cio('equip_desc 解析失败, 无法生成 AI 数据', 'error')
+        return
+
+    # 解析御魂为标准格式并计算分数
+    data_yuhun_std = pick_dwarf.extract_data_cbg(DATA_SOURCE)
+    if data_yuhun_std:
+        optimize_data_for_cal(data_yuhun_std)
+
+    # --- account ---
+    status_map = {0: '已取回', 2: '上架中', 3: '被下单', 6: '已售出'}
+    status_code = data_core.get('status', -1)
+    achieve_ids = data_game.get('achieve_ids', [])
+    fq_levels = {239: '非洲·大阴阳师', 238: '非洲·阴阳师',
+                 237: '非酋·高级', 236: '非酋·中级', 235: '非酋·初级'}
+    feiqiu_level = '无'
+    for fq_id in (239, 238, 237, 236, 235):
+        if fq_id in achieve_ids:
+            feiqiu_level = fq_levels[fq_id]
+            break
+    fengzi_du = 0
+    fzbw_map = {40705: 12000, 40704: 8000, 40703: 5000,
+                40702: 3000, 40701: 1000}
+    for fz_id, fz_val in fzbw_map.items():
+        if fz_id in achieve_ids:
+            fengzi_du = fz_val
+            break
+    chengjiu_dian = 0
+    cj_map = {10123: 5000, 10122: 4000, 10121: 3000,
+              10120: 2000, 10119: 1000}
+    for cj_id, cj_val in cj_map.items():
+        if cj_id in achieve_ids:
+            chengjiu_dian = cj_val
+            break
+
+    # 推测黑蛋消耗
+    damo_yx_cost = infer_damo_yx_cost(data_game)
+    damo_count_dict = data_game.get('damo_count_dict', {})
+    damo_yx_owned = sum(
+        num for damoes in damo_count_dict.values()
+        for damo, num in damoes.items() if damo == '411'
+    )
+
+    account = {
+        'area': data_core.get('area_name', ''),
+        'server': data_core.get('server_name', ''),
+        'role_name': data_core.get('equip_name', ''),
+        'level': data_core.get('equip_level', 0),
+        'sign_days': data_game.get('sign_days', 0),
+        'status': status_map.get(status_code, '未知'),
+        'price_rmb': round(data_core.get('price', 0) / 100, 2),
+        'currency': {
+            'money': data_game.get('money', 0),
+            'gouyu': data_game.get('goyu', 0),
+            'strength': data_game.get('strength', 0),
+            'mystery_amulet': data_game.get('gameble_card', 0),
+            'ar_amulet': data_game.get('ar_gamble_card', 0),
+            'ofuda': data_game.get('soul_jade', 0),
+            'gold_ofuda': data_game.get('currency_900188', 0),
+            'hunyu': data_game.get('hunyu', 0),
+            'skin_coupon': data_game.get('skin_coupon', 0),
+        },
+        'achievements': {
+            'fengzi_du': fengzi_du,
+            'chengjiu_dian': chengjiu_dian,
+            'feiqiu_level': feiqiu_level,
+            'tanxue_baigui_cleared': 20400 in achieve_ids,
+        },
+        'damo_yx_owned': damo_yx_owned,
+        'damo_yx_inferred_cost': damo_yx_cost,
+        'ssr_coin_available': data_game.get('ssr_coin', 0) == 1,
+        'sp_coin_available': data_game.get('sp_coin', 0) == 1,
+    }
+
+    # --- heroes ---
+    heroes_onmyoji = {10, 11, 12, 13, 900, 901, 902, 903}
+    raw_heroes = list(data_game.get('heroes', {}).values())
+    heroes_list = []
+    for h in raw_heroes:
+        hero_id = h.get('heroId', 0)
+        if hero_id in heroes_onmyoji:
+            continue
+        skinfo = h.get('skinfo', [])
+        # 保守逻辑：所有技能均为 5 级才视为满技能
+        fully_skilled = (
+            len(skinfo) > 0
+            and all(info[1] == 5 for info in skinfo)
+        )
+        rarity_idx = h.get('rarity', 0)
+        rarity_name = HERO_RARITY[rarity_idx] if 0 <= rarity_idx < len(
+            HERO_RARITY) else ''
+        heroes_list.append({
+            'uid': h.get('uid', ''),
+            'hero_uid': h.get('heroUid', ''),
+            'hero_id': hero_id,
+            'name': h.get('name', ''),
+            'nick': h.get('nick', ''),
+            'rarity': rarity_name,
+            'level': h.get('level', 0),
+            'star': h.get('star', 0),
+            'awake': bool(h.get('awake', 0)),
+            'lock': bool(h.get('lock', False)),
+            'skinid': h.get('skinid', None),
+            'usingCards': h.get('usingCards', []),
+            'attrs': h.get('attrs', {}),
+            'skills': [{'id': info[0], 'level': info[1]}
+                       for info in skinfo],
+            'equips': h.get('equips', []),
+            'fully_skilled': fully_skilled,
+        })
+
+    # --- souls ---
+    # 构建御魂名称→编号反查表
+    kinds_name_to_id = {v: k for k, v in pick_dwarf.KINDS.items()}
+    raw_inventory = data_game.get('inventory', {})
+    souls_list = []
+    if data_yuhun_std:
+        for s in data_yuhun_std:
+            sgl = s.get('attrs', {}).get('sgl')
+            raw_item = raw_inventory.get(s.get('id', ''), {})
+            souls_list.append({
+                'uuid': raw_item.get('uuid', s.get('id', '')),
+                'suit_id': kinds_name_to_id.get(s.get('kind', ''), 0),
+                'kind': s.get('kind', ''),
+                'pos': s.get('pos', 0),
+                'quality': s.get('star', 0),
+                'level': s.get('level', 0),
+                'main_attr': s.get('attrs', {}).get('main', {}),
+                'sub_attrs': s.get('attrs', {}).get('subs', []),
+                'single_attrs': sgl if sgl else None,
+                'score_damage': s.get('score_dmg', 0),
+                'lock': bool(raw_item.get('lock', False)),
+                'garbage': bool(raw_item.get('isuseless', False)),
+                'herouid': raw_item.get('herouid', ''),
+                'rattr': raw_item.get('rattr', []),
+                'base_r': raw_item.get('base_r', 0),
+                'base_rindex': raw_item.get('base_rindex', 0),
+                'exp': raw_item.get('exp', 0),
+                'raw_attrs': raw_item.get('attrs', []),
+            })
+
+    # --- fragments ---
+    raw_fragments = list(data_game.get('hero_fragment', {}).values())
+    fragments_list = [
+        {'name': frag.get('name', ''), 'count': frag.get('num', 0)}
+        for frag in raw_fragments
+    ]
+
+    # --- summary ---
+    six_star_heroes = [h for h in heroes_list if h['star'] == 6]
+    sp_ssr_heroes = [h for h in heroes_list
+                     if h['rarity'] in ('SP', 'SSR')]
+    six_star_sp_ssr = [h for h in sp_ssr_heroes if h['star'] == 6]
+    fully_skilled_sp_ssr = [h for h in sp_ssr_heroes if h['fully_skilled']]
+
+    # 装备了御魂的式神数
+    equipped_hero_uids = set(
+        s.get('herouid', '') for s in souls_list
+        if s.get('herouid')
+    )
+
+    # 重复 hero_id（同名式神多号机）
+    hero_id_counts = {}
+    for h in heroes_list:
+        hid = h.get('hero_id', 0)
+        hero_id_counts[hid] = hero_id_counts.get(hid, 0) + 1
+    duplicate_hero_ids = [
+        {'hero_id': hid, 'name': next(
+            (h['name'] for h in heroes_list if h.get('hero_id') == hid), ''
+        ), 'count': cnt}
+        for hid, cnt in hero_id_counts.items() if cnt > 1
+    ]
+
+    # SP/SSR 拥有与缺失
+    thread_fetch_config.join()
+    heroes_x_names = [name for heroes in HEROES_X.values()
+                      for name in heroes]
+    owned_names = {h['name'] for h in heroes_list}
+    all_sp = [name for hid, name in sorted(
+        HERO.get(5, {}).items()) if name not in heroes_x_names]
+    all_ssr = [name for hid, name in sorted(
+        HERO.get(4, {}).items()) if name not in heroes_x_names]
+    sp_missing = [n for n in all_sp if n not in owned_names]
+    ssr_missing = [n for n in all_ssr if n not in owned_names]
+
+    # 御魂统计
+    souls_6max = [s for s in souls_list
+                  if s['quality'] == 6 and s['level'] == 15]
+    total_souls_count = data_game.get('equips_summary', len(souls_list))
+
+    # 速度御魂排序（复用 lambda 提取速度值）
+    def _soul_speed(s):
+        spd = 0.0
+        if s.get('main_attr', {}).get('attr') == '速度':
+            spd += s['main_attr'].get('value', 0)
+        spd += sum(sub.get('value', 0)
+                   for sub in s.get('sub_attrs', [])
+                   if sub.get('attr') == '速度')
+        return spd
+
+    speed_sorted = sorted(souls_list, key=_soul_speed, reverse=True)
+
+    speed_souls_top5 = []
+    for s in speed_sorted[:5]:
+        spd_val = _soul_speed(s)
+        if spd_val <= 0:
+            break
+        speed_souls_top5.append({
+            'kind': s.get('kind', ''),
+            'pos': s.get('pos', 0),
+            'speed': round(spd_val, 2),
+        })
+
+    top_speed_souls_more = []
+    for s in speed_sorted[:30]:
+        spd_val = _soul_speed(s)
+        if spd_val <= 0:
+            break
+        top_speed_souls_more.append({
+            'kind': s.get('kind', ''),
+            'pos': s.get('pos', 0),
+            'quality': s.get('quality', 0),
+            'speed': round(spd_val, 2),
+            'main_attr': s.get('main_attr', {}).get('attr', ''),
+            'sub_attrs': s.get('sub_attrs', []),
+            'single_attrs': s.get('single_attrs'),
+        })
+
+    # 输出御魂排序
+    output_sorted = sorted(
+        souls_list,
+        key=lambda x: x.get('score_damage', 0),
+        reverse=True
+    )
+
+    output_souls_top5 = []
+    for s in output_sorted[:5]:
+        if s.get('score_damage', 0) <= 0:
+            break
+        output_souls_top5.append({
+            'kind': s.get('kind', ''),
+            'pos': s.get('pos', 0),
+            'score_damage': s.get('score_damage', 0),
+            'main_attr': s.get('main_attr', {}).get('attr', ''),
+        })
+
+    top_damage_souls_more = []
+    for s in output_sorted[:30]:
+        if s.get('score_damage', 0) <= 0:
+            break
+        top_damage_souls_more.append({
+            'kind': s.get('kind', ''),
+            'pos': s.get('pos', 0),
+            'quality': s.get('quality', 0),
+            'score_damage': s.get('score_damage', 0),
+            'main_attr': s.get('main_attr', {}),
+            'sub_attrs': s.get('sub_attrs', []),
+            'single_attrs': s.get('single_attrs'),
+        })
+
+    # 皮肤
+    skin_data = data_game.get('skin', {})
+    skin_ss = skin_data.get('ss', [])
+    skin_count = len(skin_ss)
+
+    # 联动
+    raw_fragments_dict = data_game.get('hero_fragment', {})
+    fragment_map = {
+        info.get('name', ''): info.get('num', 0)
+        for info in raw_fragments_dict.values()
+    }
+    collab = {}
+    for period, heroes_dict in HEROES_X.items():
+        period_info = {}
+        for hero_name, rarity in heroes_dict.items():
+            owned_count = len([h for h in heroes_list
+                              if h['name'] == hero_name])
+            frag_count = fragment_map.get(hero_name, 0)
+            period_info[hero_name] = {
+                'owned': owned_count,
+                'fragments': frag_count,
+            }
+        collab[period] = period_info
+
+    summary = {
+        'total_heroes': len(heroes_list),
+        'six_star_heroes': len(six_star_heroes),
+        'six_star_sp_ssr_count': len(six_star_sp_ssr),
+        'fully_skilled_sp_ssr': len(fully_skilled_sp_ssr),
+        'conservative_fully_skilled_sp_ssr_count': len(fully_skilled_sp_ssr),
+        'equipped_heroes_count': len(equipped_hero_uids),
+        'duplicate_hero_ids': duplicate_hero_ids,
+        'sp_owned': len([h for h in heroes_list if h['rarity'] == 'SP']),
+        'ssr_owned': len([h for h in heroes_list if h['rarity'] == 'SSR']),
+        'sp_missing': sp_missing,
+        'ssr_missing': ssr_missing,
+        'total_souls': total_souls_count,
+        'six_star_max_souls': len(souls_6max),
+        'speed_souls_top5': speed_souls_top5,
+        'top_speed_souls_more': top_speed_souls_more,
+        'output_souls_top5': output_souls_top5,
+        'top_damage_souls_more': top_damage_souls_more,
+        'skin_count': skin_count,
+        'collab_heroes': collab,
+    }
+
+    profile = {
+        'account': account,
+        'heroes': heroes_list,
+        'souls': souls_list,
+        'fragments': fragments_list,
+        'summary': summary,
+    }
+
+    file_ai = path.join(DUMP_DIR, 'ai_profile.json')
+    with open(file_ai, 'w', encoding='utf-8') as f:
+        json.dump(profile, f, ensure_ascii=False, indent=2)
+    cio('已保存 AI 数据 \'%s\'' % path.basename(file_ai), 'info')
 
 
 def main(callback=None):
@@ -1318,7 +1692,11 @@ def main(callback=None):
             '输出完整/精简结果? (直接回车即指定前者) ', 'input', True
         ) else False
     fetch_data(url_equip)
+    if DUMP_RAW:
+        dump_raw_data()
     bench()
+    if DUMP_AI:
+        dump_ai_profile()
     save(url_equip)
 
 
