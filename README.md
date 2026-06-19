@@ -1,9 +1,8 @@
 # 号来
 
-[![Release](https://img.shields.io/badge/Release-1.6-brightgreen.svg)](https://github.com/nguaduot/yys-cbg-bench)
-[![Download](https://img.shields.io/badge/Download-EXE-brightgreen.svg)](dist/%E5%8F%B7%E6%9D%A51.6.exe)
+[![Release](https://img.shields.io/badge/Release-1.7-brightgreen.svg)](https://github.com/nguaduot/yys-cbg-bench)
 
-[阴阳师藏宝阁](https://yys.cbg.163.com/)衍生小工具，用于提取游戏帐号要点并生成图文报告。
+[阴阳师藏宝阁](https://yys.cbg.163.com/)衍生小工具，用于提取游戏帐号要点并生成图文报告，支持导出结构化 JSON 供 AI 分析账号规划。
 
 其实，用处不大，藏宝阁官网展示的数据不足深挖，无非是算算一速啥的。
 
@@ -25,6 +24,84 @@
 pip install pillow
 ```
 
+### 快速开始
+
+**GUI 模式（推荐）：**
+
+```
+双击 号来.bat
+```
+
+弹出窗口，粘贴藏宝阁链接，点击按钮即可。支持实时日志、输出目录选择。
+
+**命令行模式：**
+
+```
+# 原有功能：生成图文报告
+python code/cbg_bench.py -u "藏宝阁链接"
+
+# 新增：导出 AI 分析数据
+python code/cbg_bench.py --dump-raw --dump-ai -u "藏宝阁链接"
+
+# 精简模式（不生成图片报告，更快）
+python code/cbg_bench.py --dump-raw --dump-ai --lite -u "藏宝阁链接"
+```
+
+也可直接双击 `dump_ai.bat`（完整）或 `dump_ai_lite.bat`（精简），粘贴链接回车。
+
+### AI 数据导出
+
+使用 `--dump-raw` 和/或 `--dump-ai` 参数，在 `output/` 目录生成：
+
+| 文件 | 说明 |
+|------|------|
+| `raw_cbg.json` | 藏宝阁接口原始返回 |
+| `equip_desc.json` | 解析后的游戏数据 |
+| `ai_profile.json` | 结构化 AI 分析数据 |
+
+`ai_profile.json` 结构：
+
+```json
+{
+  "account": {
+    "area", "server", "role_name", "level", "sign_days",
+    "status", "price_rmb",
+    "currency": { "money", "gouyu", "strength", "mystery_amulet", "hunyu", ... },
+    "achievements": { "fengzi_du", "chengjiu_dian", "feiqiu_level", ... },
+    "damo_yx_owned", "damo_yx_inferred_cost",
+    "ssr_coin_available", "sp_coin_available"
+  },
+  "heroes": [
+    {
+      "uid", "hero_uid", "hero_id", "name", "nick", "rarity",
+      "level", "star", "awake", "lock", "skinid",
+      "usingCards", "attrs", "skills", "equips", "fully_skilled"
+    }
+  ],
+  "souls": [
+    {
+      "uuid", "suit_id", "kind", "pos", "quality", "level",
+      "main_attr", "sub_attrs", "single_attrs",
+      "score_damage", "lock", "garbage",
+      "herouid", "rattr", "base_r", "base_rindex", "exp", "raw_attrs"
+    }
+  ],
+  "fragments": [ { "name", "count" } ],
+  "summary": {
+    "total_heroes", "six_star_heroes", "six_star_sp_ssr_count",
+    "fully_skilled_sp_ssr", "conservative_fully_skilled_sp_ssr_count",
+    "equipped_heroes_count", "duplicate_hero_ids",
+    "sp_owned", "ssr_owned", "sp_missing", "ssr_missing",
+    "total_souls", "six_star_max_souls",
+    "speed_souls_top5", "top_speed_souls_more",
+    "output_souls_top5", "top_damage_souls_more",
+    "skin_count", "collab_heroes"
+  }
+}
+```
+
+使用 `--dump-dir <目录>` 可指定输出目录（默认 `output`）。
+
 ### 文档
 
 ```
@@ -37,6 +114,9 @@ python cbg_bench.py -h
   -v, --version  程序版本
   -l, --lite     输出结果精简化(未指定则输出完整结果)
   -u, --url      藏宝阁商品详情链接
+  --dump-raw     保存藏宝阁接口原始返回 JSON
+  --dump-ai      保存适合 AI 分析的结构化 JSON
+  --dump-dir     指定输出目录(默认 output)
 + 若未指定 -u, 程序会读取未知参数, 若也无未知参数, 不启动程序
 + 不带任何参数也可启动程序, 会有参数输入引导
 输出结果:
@@ -100,6 +180,17 @@ python cbg_bench.py -h
 痒痒鼠相关问题欢迎来找我讨论，代码改进或漏洞也欢迎一起交流。
 
 ### 更新日志
+
+v1.7
++ 新增 AI 账号规划数据导出功能（`--dump-raw`、`--dump-ai`、`--dump-dir`）
++ 新增 `ai_profile.json` 结构化输出，包含 account/heroes/souls/fragments/summary 五大板块
++ heroes 保留完整原始字段（uid、hero_uid、nick、lock、skinid、usingCards、attrs），支持多号机区分
++ souls 保留完整原始字段（uuid、herouid、rattr、base_r、base_rindex、exp、raw_attrs）
++ 修复 fully_skilled 逻辑（保守判定：所有技能均为 5 级）
++ summary 新增 equipped_heroes_count、six_star_sp_ssr_count、conservative_fully_skilled_sp_ssr_count、duplicate_hero_ids、top_speed_souls_more（前30）、top_damage_souls_more（前30）
++ 新增 GUI 界面（`gui.py` / 双击`号来.bat`），支持粘贴链接、实时日志、输出目录选择
++ 新增快捷启动脚本（`dump_ai.bat`、`dump_ai_lite.bat`）
++ 修复 Pillow 10 兼容性问题（`getsize` → `getlength`）
 
 v1.6.210128
 + 检测SP/SSR未拥有式神所用图鉴从上架时调整至当下。如远古时期上架的全图鉴帐号在出了新式神的当下便不再视为全图鉴
